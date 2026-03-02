@@ -109,6 +109,92 @@ TYPE_MAP = {
     "storage": "Storage Facility"
 }
 
+# Rule-based keyword enrichment map
+RULE_BASED_KEYWORD_MAP = {
+    "misthan": "Sweet Shop",
+    "sweets": "Sweet Shop",
+    "mithai": "Sweet Shop",
+    "halwai": "Sweet Shop",
+    "confectionery": "Sweet Shop",
+    "nursing": "Nursing Home",
+    "clinic": "Clinic",
+    "hospital": "Hospital",
+    "diagnostic": "Diagnostic Center",
+    "pathology": "Pathology Lab",
+    "dental": "Dental Clinic",
+    "eye": "Eye Clinic",
+    "skin": "Skin Clinic",
+    "physiotherapy": "Physiotherapy Center",
+    "pharmacy": "Pharmacy",
+    "medical": "Medical Store",
+    "restaurant": "Restaurant",
+    "dhaba": "Dhaba",
+    "cafe": "Cafe",
+    "coffee": "Cafe",
+    "bakery": "Bakery",
+    "pizza": "Pizza Place",
+    "burger": "Burger Joint",
+    "biryani": "Biryani Restaurant",
+    "chinese": "Chinese Restaurant",
+    "salon": "Salon",
+    "parlour": "Beauty Parlor",
+    "spa": "Spa",
+    "gym": "Gym",
+    "fitness": "Fitness Center",
+    "yoga": "Yoga Center",
+    "school": "School",
+    "college": "College",
+    "institute": "Institute",
+    "coaching": "Coaching Center",
+    "tuition": "Tuition Center",
+    "hotel": "Hotel",
+    "guest": "Guest House",
+    "lodge": "Lodge",
+    "resort": "Resort",
+    "jewel": "Jewellery Shop",
+    "gold": "Jewellery Shop",
+    "electronics": "Electronics Store",
+    "mobile": "Mobile Shop",
+    "computer": "Computer Store",
+    "furniture": "Furniture Store",
+    "cloth": "Clothing Store",
+    "garment": "Garment Shop",
+    "boutique": "Boutique",
+    "tailor": "Tailor Shop",
+    "shoe": "Shoe Store",
+    "footwear": "Footwear Shop",
+    "book": "Book Store",
+    "stationery": "Stationery Shop",
+    "gift": "Gift Shop",
+    "toy": "Toy Store",
+    "hardware": "Hardware Store",
+    "paint": "Paint Shop",
+    "plumber": "Plumbing Service",
+    "electrician": "Electrical Service",
+    "carpenter": "Carpentry Service",
+    "mechanic": "Mechanic Shop",
+    "garage": "Auto Garage",
+    "service": "Service Center",
+    "repair": "Repair Shop",
+    "laundry": "Laundry Service",
+    "dry": "Dry Cleaning",
+    "pet": "Pet Shop",
+    "veterinary": "Veterinary Clinic",
+    "temple": "Temple",
+    "mandir": "Temple",
+    "mosque": "Mosque",
+    "masjid": "Mosque",
+    "church": "Church",
+    "gurudwara": "Gurudwara",
+    "bank": "Bank",
+    "atm": "ATM",
+    "insurance": "Insurance Agency",
+    "real estate": "Real Estate Agency",
+    "property": "Property Dealer",
+    "travel": "Travel Agency",
+    "tour": "Tour Operator"
+}
+
 
 @dataclass
 class BusinessData:
@@ -286,40 +372,50 @@ Return only the category name, nothing else."""
         return place_types[0].replace("_", " ").title() if place_types else "Business", place_types
 
 
-def generate_search_queries(category: str, city: str) -> List[str]:
-    """Generate high-intent local search queries"""
-    prompt = f"""Generate 5 high-intent local search queries for finding a {category} business in {city}, India.
-
-IMPORTANT: The business category is "{category}". Generate queries specifically for this category only.
-
-These should be queries real customers would use to find this type of business.
-
-Format: Return as JSON array of strings.
-
-Example for a Cafe in Mumbai:
-["best cafe in Mumbai", "top rated cafe near me", "coffee shop Mumbai", "cafe with wifi Mumbai", "popular cafe in Mumbai"]
-
-Category: {category}
-City: {city}
-
-Return only the JSON array with queries specifically for {category}."""
-
-    try:
-        response = gemini_model.generate_content(prompt)
-        content = response.text.strip()
-        queries = safe_json_parse(content)
-        
-        if queries and isinstance(queries, list):
-            return queries[:5]
-    except Exception as e:
-        st.warning(f"Gemini query generation failed: {str(e)}")
+def extract_search_keyword(business_name: str, place_types: List[str], reviews: List[Dict[str, Any]]) -> str:
+    """Extract niche keyword using business name, types, and reviews"""
     
+    # Extract tokens from business name
+    name_tokens = business_name.lower().split()
+    
+    # Check business name tokens against keyword map
+    for token in name_tokens:
+        for key, value in RULE_BASED_KEYWORD_MAP.items():
+            if key in token:
+                return value
+    
+    # Check place types against keyword map
+    for place_type in place_types:
+        place_type_lower = place_type.lower()
+        for key, value in RULE_BASED_KEYWORD_MAP.items():
+            if key in place_type_lower:
+                return value
+    
+    # Check review praise keywords
+    if reviews:
+        review_texts = " ".join([r.get("text", "")[:200] for r in reviews[:5]]).lower()
+        for key, value in RULE_BASED_KEYWORD_MAP.items():
+            if key in review_texts:
+                return value
+    
+    # Fallback to TYPE_MAP
+    for place_type in place_types:
+        place_type_lower = place_type.lower()
+        if place_type_lower in TYPE_MAP:
+            return TYPE_MAP[place_type_lower]
+    
+    # Final fallback
+    return place_types[0].replace("_", " ").title() if place_types else "Business"
+
+
+def generate_search_queries(keyword: str, city: str) -> List[str]:
+    """Generate deterministic search queries using enriched keyword"""
     return [
-        f"best {category} in {city}",
-        f"top rated {category} near me",
-        f"{category} {city}",
-        f"popular {category} in {city}",
-        f"{category} near me"
+        f"best {keyword} in {city}",
+        f"{keyword} in {city}",
+        f"top rated {keyword} in {city}",
+        f"{keyword} near me",
+        f"famous {keyword} in {city}"
     ]
 
 
@@ -546,8 +642,12 @@ def main_analysis(business_name: str, city: str):
         st.info(f"📋 **Detected Google Types:** {', '.join(raw_types[:5])}")
         st.success(f"🏷️ **Classified as:** {category}")
     
+    with st.spinner("🔎 Extracting search keyword..."):
+        search_keyword = extract_search_keyword(business.name, business.types, business.reviews)
+        st.success(f"🔑 **Search Keyword:** {search_keyword}")
+    
     with st.spinner("🔎 Generating search queries..."):
-        queries = generate_search_queries(category, city)
+        queries = generate_search_queries(search_keyword, city)
     
     with st.spinner("📈 Analyzing search rankings..."):
         ranks = []
@@ -558,7 +658,7 @@ def main_analysis(business_name: str, city: str):
                 st.warning(f"Ranking check failed for '{query}': {error}")
     
     with st.spinner("🏪 Finding competitors..."):
-        competitors, error, raw_data = fetch_nearby_competitors(business.lat, business.lng, category, place_id)
+        competitors, error, raw_data = fetch_nearby_competitors(business.lat, business.lng, search_keyword, place_id)
         debug_data["nearby_search"] = raw_data
         if error:
             st.warning(f"Competitor search: {error}")
